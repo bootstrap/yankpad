@@ -138,6 +138,7 @@
 (require 'org-capture)
 (require 'org-macs)
 (require 'thingatpt)
+(require 'subr-x)
 (when (version< (org-version) "8.3")
   (require 'ox))
 
@@ -218,8 +219,12 @@ If 'abbrev, the items will overwrite `local-abbrev-table'."
 (defun yankpad-set-category ()
   "Change the yankpad category."
   (interactive)
-  (setq yankpad-category
-        (completing-read "Category: " (yankpad--categories)))
+  (let ((categories (yankpad--categories)))
+    (cond ((equal (length categories) 0)
+           (user-error "Your yankpad file doesn't contain any categories"))
+          ((equal (length categories) 1)
+           (setq yankpad-category (car categories)))
+          (t (setq yankpad-category (completing-read "Category: " categories)))))
   (run-hooks 'yankpad-switched-category-hook))
 
 (defun yankpad-set-local-category (category)
@@ -333,9 +338,11 @@ Return the result of the function output as a string."
           (org-mode)
           (insert content)
           (goto-char (point-min))
-          (if (org-in-src-block-p)
+          (if (or (org-in-src-block-p)
+                  (and (ignore-errors (org-next-block 1))
+                       (org-in-src-block-p)))
               (prin1-to-string (org-babel-execute-src-block))
-            (error "No org-mode src-block at start of snippet"))))
+            (error "First block in snippet must be an org-mode src block"))))
     (if (intern-soft snippetname)
         (prin1-to-string (funcall (intern-soft snippetname)))
       (error (concat "\"" snippetname "\" isn't a function")))))
@@ -382,8 +389,10 @@ Return the result of the function output as a string."
                               ((member "wrap" tags)
                                t)
                               (t yas-wrap-around-region))))
-              (when (and yankpad-respect-current-org-level
-                         (equal major-mode 'org-mode)
+              (when (and (equal major-mode 'org-mode)
+                         (or yankpad-respect-current-org-level
+                             (member "orglevel" tags))
+                         (not (member "no_orglevel" tags))
                          (org-current-level))
                 (setq prepend-asterisks (org-current-level)))
               (yankpad--insert-snippet-text
@@ -729,7 +738,7 @@ FN is the function that will extract either name or key."
   "Company backend for yankpad."
   (interactive (list 'interactive))
   (if (require 'company nil t)
-      (case command
+      (cl-case command
         (interactive (company-begin-backend 'company-yankpad))
         (prefix (company-grab-symbol))
         (annotation (car (company-yankpad--name-or-key
